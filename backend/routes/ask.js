@@ -49,27 +49,24 @@ router.delete("/clear/:sessionId", (req, res) => {
 
 // 💬 Existing /ask logic — now extended with chat session context
 router.post("/ask", async (req, res) => {
-  const { question, url, content, prompt, sessionId } = req.body;
+  let { question, url, content, prompt, sessionId } = req.body;
 
-// 🧩 Handle frontend payload (messages array)
-let userMessage = "";
-if (req.body.messages && Array.isArray(req.body.messages)) {
-  const msgs = req.body.messages;
-  const lastUserMsg = msgs.reverse().find(m => m.role === "user");
-  if (lastUserMsg) userMessage = lastUserMsg.content;
+  // 🧩 Handle frontend payload (messages array)
+  if (req.body.messages && Array.isArray(req.body.messages)) {
+    const msgs = req.body.messages;
+    const lastUserMsg = msgs.reverse().find(m => m.role === "user");
+    if (lastUserMsg) question = lastUserMsg.content;
 
-  // If there's system content (URL or text), handle that
-  const systemMsg = msgs.find(m => m.role === "system");
-  if (systemMsg) {
-    if (systemMsg.content.startsWith("Based on this URL:")) {
-      req.body.url = systemMsg.content.replace("Based on this URL:", "").trim();
-    } else if (systemMsg.content.startsWith("Based on this content:")) {
-      req.body.content = systemMsg.content.replace("Based on this content:", "").trim();
+    // If there's system content (URL or text), handle that
+    const systemMsg = msgs.find(m => m.role === "system");
+    if (systemMsg) {
+      if (systemMsg.content.startsWith("Based on this URL:")) {
+        url = systemMsg.content.replace("Based on this URL:", "").trim();
+      } else if (systemMsg.content.startsWith("Based on this content:")) {
+        content = systemMsg.content.replace("Based on this content:", "").trim();
+      }
     }
   }
-
-  req.body.question = userMessage;
-}
 
   if (!question && !prompt) {
     return res.status(400).json({ error: "Question or prompt is required" });
@@ -117,31 +114,26 @@ if (req.body.messages && Array.isArray(req.body.messages)) {
     }
     // 3️⃣ If url or content provided
     else {
-      let contextPrompt = `Question: ${question}`;
+      let contextData = "";
 
       if (url) {
         try {
           webContent = await fetchWebContent(url);
-          contextPrompt = `Read the following webpage content and answer the question clearly. 
-          Use unordered (•) and ordered (1., 2., 3.) lists, with minimal emojis to highlight important points. 
-          Webpage Content: ${webContent}
-          Question: ${question}`;
+          contextData += `Webpage Content:\n${webContent}\n\n`;
         } catch (error) {
           console.error("Failed to fetch web content:", error);
-          contextPrompt = `Question: ${question}
-        (Note: Unable to fetch webpage content from ${url})`;
+          contextData += `(Note: Unable to fetch webpage content from ${url})\n\n`;
         }
       }
 
       if (content) {
-        contextPrompt = `Use the following content to answer the question clearly. 
-                Structure your answer with unordered (•) and ordered (1., 2., 3.) lists. 
-                Add minimal, relevant emojis to make key points stand out. 
-                Content: ${content}
-                Question: ${question}`;
+        contextData += `Content:\n${content}\n\n`;
       }
 
-      finalPrompt = contextPrompt;
+      finalPrompt = `Read the following information and answer the question clearly.
+      Use unordered (•) and ordered (1., 2., 3.) lists, with minimal emojis to highlight important points.
+      ${contextData}
+      Question: ${question}`;
     }
 
     // 🧩 Add conversation history context (if session exists)
