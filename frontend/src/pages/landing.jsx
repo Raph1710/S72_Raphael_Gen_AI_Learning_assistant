@@ -198,7 +198,7 @@ export default function Landing() {
       };
       //http://localhost:5000/api/ask
       //https://s72-raphael-gen-ai-learning-assistant.onrender.com/api/ask
-      const res = await fetch("http://localhost:5000/api/ask", {
+      const res = await fetch("https://s72-raphael-gen-ai-learning-assistant.onrender.com/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

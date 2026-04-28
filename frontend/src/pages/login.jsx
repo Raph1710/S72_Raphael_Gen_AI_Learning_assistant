@@ -14,8 +14,8 @@ export default function LoginPage() {
 
   // API endpoint base URL
   //http://localhost:5000/api/
-  // https://s72-raphael-gen-ai-learning-assistant.onrender.com/api
-  const API_BASE_URL = `http://localhost:5000/api/`;
+  //https://s72-raphael-gen-ai-learning-assistant.onrender.com/api
+  const API_BASE_URL = `https://s72-raphael-gen-ai-learning-assistant.onrender.com/api`;
 
   const handleLogin = async () => {
     setLoading(true);
