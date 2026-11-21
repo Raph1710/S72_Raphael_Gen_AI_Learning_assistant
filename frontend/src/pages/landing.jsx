@@ -8,6 +8,8 @@ import {
   ThumbUpIcon,
   ThumbDownIcon,
   CrossIcon,
+  CheckIcon,
+  DifficultyBadge,
 } from "../components/BrutalistIcons.jsx";
 
 // Normalise LLM output so inline • bullets become proper markdown list items.
@@ -43,6 +45,153 @@ const STEER_COMMANDS = [
 ];
 
 const API = "http://localhost:5000/api";
+
+// Neo-Brutalist Collapsible Quiz History Card
+function QuizHistoryCard({ msg }) {
+  const [expanded, setExpanded] = useState(false);
+  const percentage = msg.percentage ?? Math.round(((msg.score || 0) / (msg.totalQuestions || 1)) * 100);
+  const isGreat = percentage >= 80;
+  const isPass = percentage >= 60;
+
+  return (
+    <div className="flex justify-start w-full my-3">
+      <div
+        className="w-full max-w-2xl border-4 border-black bg-white transition-all duration-200"
+        style={{
+          boxShadow: expanded ? "6px 6px 0 #4f46e5" : "4px 4px 0 #000",
+          borderLeft: "6px solid #4f46e5",
+        }}
+      >
+        {/* Clickable Header Bar */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full p-4 flex flex-wrap items-center justify-between gap-3 text-left hover:bg-indigo-50 transition-colors cursor-pointer select-none"
+        >
+          <div className="flex items-center gap-3">
+            <span className="px-2.5 py-1 bg-black text-white font-black text-xs uppercase tracking-widest border border-black">
+              Quiz
+            </span>
+            <span className="font-black text-sm uppercase tracking-wide text-black">
+              Quiz taken at {msg.timestamp}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div
+              className="px-2.5 py-0.5 border border-black font-black text-xs uppercase"
+              style={{
+                background: isGreat ? "#d1fae5" : isPass ? "#fef3c7" : "#fee2e2",
+                color: isGreat ? "#065f46" : isPass ? "#92400e" : "#b91c1c",
+              }}
+            >
+              Score: {msg.score}/{msg.totalQuestions}
+            </div>
+            <div
+              className="flex items-center gap-1.5 border border-black px-2 py-0.5 text-xs font-black uppercase"
+              style={{ background: "#eef0ff", color: "#1e1b4b" }}
+            >
+              <DifficultyBadge level={msg.difficulty || "medium"} size={14} />
+              <span>{msg.difficulty || "medium"}</span>
+            </div>
+            <span className="font-black text-xs uppercase tracking-wider px-2 py-1 border border-black bg-white text-black hover:bg-black hover:text-white transition-colors">
+              {expanded ? "Hide Details [-]" : "View Details [+]"}
+            </span>
+          </div>
+        </button>
+
+        {/* Expanded Content */}
+        {expanded && (
+          <div className="p-6 border-t-2 border-black bg-[#faf7f2]">
+            {/* Score Banner */}
+            <div
+              className="p-4 border-2 border-black mb-6 flex items-center justify-between"
+              style={{
+                background: isGreat ? "#d1fae5" : isPass ? "#fef3c7" : "#fee2e2",
+              }}
+            >
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-black">Final Score</p>
+                <p className="text-3xl font-black text-black">
+                  {msg.score} <span className="text-lg font-bold text-gray-700">/ {msg.totalQuestions} ({percentage}%)</span>
+                </p>
+              </div>
+              <div className="border-2 border-black px-4 py-2 font-black uppercase text-xs tracking-wider bg-white text-black">
+                {isGreat ? "Excellent" : isPass ? "Good Job" : "Review Needed"}
+              </div>
+            </div>
+
+            {/* Questions list */}
+            <div className="space-y-6">
+              {(msg.questions || []).map((item, qIdx) => (
+                <div key={qIdx} className="border-2 border-black p-4 bg-white">
+                  {/* Question title */}
+                  <div className="flex items-start gap-3 mb-3">
+                    <span
+                      className="w-6 h-6 border-2 border-black flex items-center justify-center text-xs font-black text-white flex-shrink-0"
+                      style={{ background: item.isCorrect ? "#10b981" : "#ef4444" }}
+                    >
+                      {item.isCorrect ? <CheckIcon size={12} /> : <CrossIcon size={12} />}
+                    </span>
+                    <p className="font-black text-base text-black">
+                      {item.questionNumber || qIdx + 1}. {item.question}
+                    </p>
+                  </div>
+
+                  {/* Available Options */}
+                  <div className="grid gap-2 pl-9 mb-4">
+                    {(item.options || []).map((opt, oIdx) => {
+                      const isCorrectAnswer = opt === item.correctAnswer;
+                      const isUserSelection = opt === item.userAnswer;
+                      let optStyle = { borderColor: "#e5e7eb", background: "#f9fafb", color: "#6b7280" };
+
+                      if (isCorrectAnswer) {
+                        optStyle = { borderColor: "#10b981", background: "#d1fae5", color: "#065f46" };
+                      } else if (isUserSelection && !item.isCorrect) {
+                        optStyle = { borderColor: "#ef4444", background: "#fee2e2", color: "#b91c1c", textDecoration: "line-through" };
+                      }
+
+                      return (
+                        <div
+                          key={oIdx}
+                          className="px-3 py-2 border-2 text-xs font-bold tracking-wide flex items-center justify-between"
+                          style={optStyle}
+                        >
+                          <span>{opt}</span>
+                          <span className="flex items-center gap-1.5">
+                            {isUserSelection && (
+                              <span className="uppercase text-[9px] px-1.5 py-0.5 border border-black font-black bg-white text-black">
+                                Your Pick
+                              </span>
+                            )}
+                            {isCorrectAnswer && <CheckIcon size={12} />}
+                            {isUserSelection && !isCorrectAnswer && <CrossIcon size={12} />}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Brief Explanation */}
+                  {item.explanation && (
+                    <div className="ml-9 p-3 border-2 border-black bg-indigo-50 text-indigo-950">
+                      <span className="block text-[10px] font-black uppercase tracking-widest text-indigo-700 mb-1">
+                        Why this is correct
+                      </span>
+                      <p className="text-xs font-medium leading-relaxed">
+                        {item.explanation}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function Landing() {
   const [mode, setMode] = useState("url");
@@ -163,7 +312,13 @@ export default function Landing() {
 
   const handleQuizClick = (e) => {
     e.preventDefault();
-    navigate(isLoggedIn ? "/quiz" : "/login", { state: { url: url || "", content: content || "" } });
+    navigate(isLoggedIn ? "/quiz" : "/login", {
+      state: {
+        url: url || "",
+        content: content || "",
+        chatId: currentChatId,
+      },
+    });
   };
 
   // ── Feedback ───────────────────────────────────────────────────────────────
@@ -467,6 +622,11 @@ export default function Landing() {
                       </span>
                     </div>
                   );
+                }
+
+                // Quiz History Card (collapsed by default, expands on click)
+                if (msg.role === "quiz-history") {
+                  return <QuizHistoryCard key={msg.id || i} msg={msg} />;
                 }
 
                 // User message

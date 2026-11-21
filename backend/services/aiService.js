@@ -37,22 +37,39 @@ const MODEL_PRIORITY = [
   "openai/gpt-oss-20b"
 ].filter(Boolean);
 
-export async function askGemini(prompt) {
+export async function askGemini(prompt, options = {}) {
   const client = getGroqClient();
   let lastError = null;
+
+  const messages = [
+    {
+      role: "user",
+      content: prompt,
+    },
+  ];
+
+  if (options.json) {
+    messages.unshift({
+      role: "system",
+      content: "You are a professional quiz generator. Respond ONLY with a valid JSON object matching the requested schema. No markdown fences, no conversational preamble.",
+    });
+  }
+
+  const requestConfig = {
+    messages,
+    temperature: options.temperature ?? 0.4,
+    max_tokens: options.max_tokens ?? 3000,
+  };
+
+  if (options.json) {
+    requestConfig.response_format = { type: "json_object" };
+  }
 
   for (const model of MODEL_PRIORITY) {
     try {
       const response = await client.chat.completions.create({
         model,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 2048,
+        ...requestConfig,
       });
 
       if (!response.choices || response.choices.length === 0) {

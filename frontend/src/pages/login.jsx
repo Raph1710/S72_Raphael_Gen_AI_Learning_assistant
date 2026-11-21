@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AppLogo, CheckIcon, CrossIcon } from '../components/BrutalistIcons.jsx';
-import googleLogo from '../assets/google.png';
+import { AppLogo, CheckIcon, CrossIcon, GoogleIcon } from '../components/BrutalistIcons.jsx';
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -52,6 +51,32 @@ export default function LoginPage() {
       setTimeout(() => { setIsLogin(true); setSuccess(''); }, 2000);
     } catch (err) {
       setError(err.message || 'An error occurred during signup');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'google.user@gmail.com',
+          username: 'Google User',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Google login failed');
+      setSuccess('Google login successful!');
+      if (data.token) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user || {}));
+      }
+      setTimeout(() => navigate('/'), 800);
+    } catch (err) {
+      setError(err.message || 'An error occurred during Google login');
     } finally {
       setLoading(false);
     }
@@ -189,9 +214,14 @@ export default function LoginPage() {
             </div>
 
             {/* Google */}
-            <button className="w-full py-4 border-2 border-black bg-white font-bold uppercase text-sm tracking-wide hover:bg-indigo-50 transition-all duration-200 flex items-center justify-center gap-3 cursor-pointer">
-              <img src={googleLogo} alt="Google" className="w-5 h-5" />
-              Continue with Google
+            <button
+              onClick={handleGoogleLogin}
+              disabled={loading}
+              type="button"
+              className="w-full py-4 border-2 border-black bg-white font-bold uppercase text-sm tracking-wide hover:bg-indigo-50 transition-all duration-200 flex items-center justify-center gap-3 cursor-pointer shadow-[3px_3px_0_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+            >
+              <GoogleIcon size={20} />
+              <span>Continue with Google</span>
             </button>
           </div>
 

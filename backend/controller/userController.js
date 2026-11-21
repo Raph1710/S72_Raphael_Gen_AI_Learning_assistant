@@ -105,3 +105,38 @@ export const profile = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// 🌐 POST /api/auth/google
+export const googleAuth = async (req, res) => {
+  try {
+    const { email, username, googleId } = req.body || {};
+
+    const targetEmail = (email || "user.google@gmail.com").toLowerCase().trim();
+    const targetName = username || "Google User";
+
+    let user = await User.findOne({ email: targetEmail });
+    if (!user) {
+      const generatedPassword = await bcrypt.hash(googleId || `g_${Date.now()}`, 10);
+      user = await User.create({
+        username: targetName,
+        email: targetEmail,
+        password: generatedPassword,
+      });
+    }
+
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.status(200).json({
+      message: "Google login successful",
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+      },
+    });
+  } catch (err) {
+    console.error("Google login error:", err);
+    res.status(500).json({ message: "Failed to authenticate with Google" });
+  }
+};

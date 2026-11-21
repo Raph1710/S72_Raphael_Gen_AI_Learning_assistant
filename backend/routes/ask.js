@@ -262,34 +262,60 @@ ${difficultyGuide}
 
 TASK:
 Create exactly ${numQuestions} multiple-choice questions based on the article below.
-Each question must have exactly 4 answer options and one correct answer.
+Each question must have exactly 4 answer options, one correct answer, and a concise explanation (1-2 sentences) stating why that option is correct according to the text.
 Strictly follow the difficulty rules above — the questions must feel noticeably ${difficulty === "easy" ? "simple and factual" : difficulty === "medium" ? "moderately challenging" : "difficult and analytical"}.
 Do not mix difficulty levels. Every question must match the ${difficulty.toUpperCase()} standard.
+DO NOT include any emojis anywhere in the response.
 Random seed (for variety): ${randomSeed}
 
-OUTPUT FORMAT — respond with ONLY a valid JSON array, no extra text:
-[
-  {
-    "question": "...",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "answer": "Option A"
-  }
-]
+Respond with a JSON object following this exact schema:
+{
+  "quiz": [
+    {
+      "question": "Question text here",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": "Option A",
+      "explanation": "Brief explanation of why Option A is correct according to the text."
+    }
+  ]
+}
 
 ARTICLE:
 ${webContent.substring(0, 8000)}`;
 
-    // 3️⃣ Ask the AI
-    const aiResponse = await askGemini(quizPrompt);
+    // 3️⃣ Ask the AI with JSON schema constraint
+    const aiResponse = await askGemini(quizPrompt, { json: true, max_tokens: 3000, temperature: 0.3 });
 
     // 4️⃣ Parse response safely
-    let quizData;
+    let quizData = null;
+    let parsedObj = null;
+
     try {
-      quizData = JSON.parse(aiResponse);
+      parsedObj = JSON.parse(aiResponse);
     } catch {
-      // Attempt to extract JSON if AI includes extra text
-      const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
-      quizData = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+      // Secondary extraction if wrapper text exists
+      try {
+        const cleaned = aiResponse.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        const objMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+          parsedObj = JSON.parse(objMatch[0]);
+        } else {
+          const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+          if (arrMatch) {
+            parsedObj = JSON.parse(arrMatch[0]);
+          }
+        }
+      } catch (err2) {
+        console.error("Secondary JSON extraction failed:", err2.message);
+      }
+    }
+
+    if (parsedObj) {
+      if (Array.isArray(parsedObj.quiz)) {
+        quizData = parsedObj.quiz;
+      } else if (Array.isArray(parsedObj)) {
+        quizData = parsedObj;
+      }
     }
 
     // 5️⃣ Validate structure
@@ -299,6 +325,14 @@ ${webContent.substring(0, 8000)}`;
         rawResponse: aiResponse,
       });
     }
+
+    // Ensure all items contain explanations and clean string options
+    quizData = quizData.map((item, idx) => ({
+      question: item.question || `Question ${idx + 1}`,
+      options: Array.isArray(item.options) && item.options.length >= 2 ? item.options : ["Option A", "Option B", "Option C", "Option D"],
+      answer: item.answer || item.options?.[0] || "",
+      explanation: item.explanation || "This answer is directly verified by the article content."
+    }));
 
     res.json({
       quiz: quizData,

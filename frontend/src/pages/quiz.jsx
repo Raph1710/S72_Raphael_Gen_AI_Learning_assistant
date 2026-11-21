@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   AppLogo,
@@ -51,6 +51,24 @@ export default function Quiz() {
   const location = useLocation();
   const quizUrl = location.state?.url || "";
   const quizContent = location.state?.content || "";
+  const initialChatId = location.state?.chatId || null;
+  const hasEnteredFullscreen = useRef(false);
+
+  const handleSelectDifficulty = async (id) => {
+    setDifficulty(id);
+    try {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        await elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) {
+        await elem.msRequestFullscreen();
+      }
+    } catch (err) {
+      console.warn("Fullscreen mode not permitted or denied:", err.message || err);
+    }
+  };
 
   useEffect(() => {
     if (!difficulty) return; // wait for user to pick difficulty
@@ -76,20 +94,11 @@ export default function Quiz() {
   }, [quizUrl, quizContent, difficulty]);
 
   useEffect(() => {
-    const enterFullscreen = async () => {
-      const elem = document.documentElement;
-      try {
-        if (elem.requestFullscreen) await elem.requestFullscreen();
-        else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
-        else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
-      } catch (err) {
-        console.error("Fullscreen failed:", err);
-      }
-    };
-    enterFullscreen();
-
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement && score === null) {
+      const isCurrentlyFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (isCurrentlyFullscreen) {
+        hasEnteredFullscreen.current = true;
+      } else if (hasEnteredFullscreen.current && score === null && difficulty) {
         setQuizExited(true);
         setScore(0);
         setShowExitPopup(true);
@@ -103,7 +112,7 @@ export default function Quiz() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
     };
-  }, [navigate, score]);
+  }, [navigate, score, difficulty]);
 
   const handleAnswer = (option) => setAnswers((prev) => ({ ...prev, [currentQuestion]: option }));
 
@@ -115,11 +124,75 @@ export default function Quiz() {
     }
   };
 
+  const saveQuizToHistory = (finalScore) => {
+    try {
+      const savedChats = JSON.parse(localStorage.getItem("chats") || "[]");
+      let activeChatId = initialChatId || localStorage.getItem("currentChatId");
+
+      const timestamp = new Date().toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      const quizRecord = {
+        id: "quiz_" + Date.now(),
+        role: "quiz-history",
+        timestamp,
+        difficulty: difficulty || "medium",
+        score: finalScore,
+        totalQuestions: questions.length,
+        percentage: Math.round((finalScore / questions.length) * 100),
+        url: quizUrl || null,
+        questions: questions.map((q, idx) => ({
+          questionNumber: idx + 1,
+          question: q.question,
+          options: q.options,
+          userAnswer: answers[idx] || "Not answered",
+          correctAnswer: q.answer,
+          isCorrect: answers[idx] === q.answer,
+          explanation: q.explanation || "This answer is directly verified by the source text.",
+        })),
+      };
+
+      let chatFound = false;
+      let updatedChats = savedChats.map((c) => {
+        if (c.id === activeChatId) {
+          chatFound = true;
+          return {
+            ...c,
+            messages: [...(c.messages || []), quizRecord],
+          };
+        }
+        return c;
+      });
+
+      if (!chatFound) {
+        activeChatId = Date.now().toString();
+        const newChat = {
+          id: activeChatId,
+          name: `Quiz: ${(difficulty || "medium").toUpperCase()}`,
+          messages: [quizRecord],
+        };
+        updatedChats = [...updatedChats, newChat];
+      }
+
+      localStorage.setItem("chats", JSON.stringify(updatedChats));
+      localStorage.setItem("currentChatId", activeChatId);
+    } catch (e) {
+      console.error("Failed to save quiz to history:", e);
+    }
+  };
+
   const calculateScore = () => {
     let total = 0;
     questions.forEach((q, i) => { if (answers[i] === q.answer) total++; });
     setScore(total);
     document.exitFullscreen?.();
+    saveQuizToHistory(total);
   };
 
   const handleRestart = () => { setAnswers({}); setScore(null); setCurrentQuestion(0); };
@@ -166,7 +239,7 @@ export default function Quiz() {
               {DIFFICULTIES.map((d) => (
                 <button
                   key={d.id}
-                  onClick={() => setDifficulty(d.id)}
+                  onClick={() => handleSelectDifficulty(d.id)}
                   className="w-full text-left border-4 border-black p-6 transition-all duration-200 cursor-pointer group"
                   style={{ background: d.bg, boxShadow: `6px 6px 0 ${d.shadow}` }}
                   onMouseEnter={(e) => { e.currentTarget.style.transform = "translate(-2px, -2px)"; e.currentTarget.style.boxShadow = `8px 8px 0 ${d.shadow}`; }}
@@ -324,12 +397,28 @@ export default function Quiz() {
                           }
                         >
                           <span>{option}</span>
-                          {isRight && <CheckIcon size={14} />}
-                          {isUser && !isRight && <CrossIcon size={14} />}
+                          <span className="flex items-center gap-1.5">
+                            {isUser && (
+                              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 border border-black bg-white text-black">
+                                Your Pick
+                              </span>
+                            )}
+                            {isRight && <CheckIcon size={14} />}
+                            {isUser && !isRight && <CrossIcon size={14} />}
+                          </span>
                         </div>
                       );
                     })}
                   </div>
+
+                  {q.explanation && (
+                    <div className="mt-4 ml-12 p-3.5 border-2 border-black bg-indigo-50 text-indigo-950">
+                      <span className="block text-[10px] font-black uppercase tracking-widest text-indigo-700 mb-1">
+                        Why this answer is correct
+                      </span>
+                      <p className="text-xs font-medium leading-relaxed">{q.explanation}</p>
+                    </div>
+                  )}
                 </div>
               );
             })}
