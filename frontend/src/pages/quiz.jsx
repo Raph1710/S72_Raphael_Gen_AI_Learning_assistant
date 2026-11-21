@@ -1,11 +1,16 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import {
+  AppLogo,
+  DifficultyBadge,
+  CheckIcon,
+  CrossIcon,
+} from "../components/BrutalistIcons.jsx";
 
 const DIFFICULTIES = [
   {
     id: "easy",
     label: "Easy",
-    emoji: "🟢",
     description: "Basic facts and main ideas. Great for a quick review.",
     color: "#065f46",
     bg: "#d1fae5",
@@ -15,7 +20,6 @@ const DIFFICULTIES = [
   {
     id: "medium",
     label: "Medium",
-    emoji: "🟡",
     description: "A mix of recall and inference. Tests real understanding.",
     color: "#92400e",
     bg: "#fef3c7",
@@ -25,7 +29,6 @@ const DIFFICULTIES = [
   {
     id: "hard",
     label: "Hard",
-    emoji: "🔴",
     description: "Deep comprehension and critical thinking. No skimming allowed.",
     color: "#7f1d1d",
     bg: "#fee2e2",
@@ -123,9 +126,12 @@ export default function Quiz() {
 
   const Header = ({ right }) => (
     <div className="border-b-4 border-black px-6 py-5 flex items-center justify-between flex-shrink-0" style={{ background: "#fff" }}>
-      <div className="relative">
-        <h1 className="text-3xl font-black tracking-tight uppercase">🧠 Gen AI Assistant</h1>
-        <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+      <div className="flex items-center gap-3.5">
+        <AppLogo size={38} />
+        <div className="relative">
+          <h1 className="text-3xl font-black tracking-tight uppercase">Gen AI Assistant</h1>
+          <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+        </div>
       </div>
       {right}
     </div>
@@ -168,7 +174,7 @@ export default function Quiz() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <span className="text-3xl">{d.emoji}</span>
+                      <DifficultyBadge level={d.id} size={32} />
                       <div>
                         <p className="text-xl font-black uppercase tracking-tight" style={{ color: d.color }}>{d.label}</p>
                         <p className="text-sm font-bold mt-1" style={{ color: d.color, opacity: 0.8 }}>{d.description}</p>
@@ -277,9 +283,12 @@ export default function Quiz() {
             <p className="text-5xl font-black text-white">{percentage}%</p>
           </div>
           <div className="border-4 border-white px-6 py-3" style={{ background: grade.bg }}>
-            <p className="font-black uppercase text-xs tracking-widest mb-1" style={{ color: grade.color }}>
-              {DIFFICULTIES.find(d => d.id === difficulty)?.emoji} {difficulty} difficulty
-            </p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <DifficultyBadge level={difficulty} size={18} />
+              <p className="font-black uppercase text-xs tracking-widest" style={{ color: grade.color }}>
+                {difficulty} difficulty
+              </p>
+            </div>
             <p className="font-black uppercase text-lg tracking-tight" style={{ color: grade.color }}>{grade.label}</p>
           </div>
         </div>
@@ -296,7 +305,7 @@ export default function Quiz() {
                   <div className="flex items-start gap-4 mb-4">
                     <span className="flex-shrink-0 w-8 h-8 flex items-center justify-center border-2 border-black font-black text-sm text-white"
                       style={{ background: isCorrect ? "#10b981" : "#ef4444" }}>
-                      {isCorrect ? "✓" : "✗"}
+                      {isCorrect ? <CheckIcon size={14} /> : <CrossIcon size={14} />}
                     </span>
                     <p className="font-black text-lg tracking-tight">{index + 1}. {q.question}</p>
                   </div>
@@ -305,7 +314,7 @@ export default function Quiz() {
                       const isRight = q.answer === option;
                       const isUser = userAnswer === option;
                       return (
-                        <div key={i} className="px-4 py-3 border-2 font-bold text-sm tracking-wide"
+                        <div key={i} className="px-4 py-3 border-2 font-bold text-sm tracking-wide flex items-center justify-between"
                           style={
                             isRight
                               ? { borderColor: "#10b981", background: "#d1fae5", color: "#065f46" }
@@ -314,9 +323,9 @@ export default function Quiz() {
                               : { borderColor: "#d1d5db", background: "#f9fafb", color: "#9ca3af" }
                           }
                         >
-                          {option}
-                          {isRight && "  ✓"}
-                          {isUser && !isRight && "  ✗"}
+                          <span>{option}</span>
+                          {isRight && <CheckIcon size={14} />}
+                          {isUser && !isRight && <CrossIcon size={14} />}
                         </div>
                       );
                     })}
@@ -356,10 +365,11 @@ export default function Quiz() {
       <Header
         right={
           <div className="flex items-center gap-3">
-            <span className="font-black uppercase text-xs tracking-widest border-2 border-black px-3 py-2"
+            <div className="flex items-center gap-2 border-2 border-black px-3 py-1.5"
               style={{ background: DIFFICULTIES.find(d => d.id === difficulty)?.bg, color: DIFFICULTIES.find(d => d.id === difficulty)?.color }}>
-              {DIFFICULTIES.find(d => d.id === difficulty)?.emoji} {difficulty}
-            </span>
+              <DifficultyBadge level={difficulty} size={18} />
+              <span className="font-black uppercase text-xs tracking-widest">{difficulty}</span>
+            </div>
             <span className="font-black uppercase text-sm tracking-widest border-2 border-black px-4 py-2"
               style={{ background: "#eef0ff", color: "#4f46e5" }}>
               {currentQuestion + 1} / {questions.length}

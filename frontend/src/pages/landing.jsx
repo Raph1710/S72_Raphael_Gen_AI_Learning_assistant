@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
+import {
+  AppLogo,
+  RobotIllustration,
+  SlidersIcon,
+  ThumbUpIcon,
+  ThumbDownIcon,
+  CrossIcon,
+} from "../components/BrutalistIcons.jsx";
 
 // Normalise LLM output so inline • bullets become proper markdown list items.
 function normalizeLLMMarkdown(text) {
@@ -180,7 +188,7 @@ export default function Landing() {
     // Inject a visible system note into the chat
     setMessages((prev) => [
       ...prev,
-      { role: "system-note", content: `🎛️ Style updated: "${STEER_COMMANDS.find(s => s.instruction === instruction)?.label}"` },
+      { role: "system-note", content: `Style updated: "${STEER_COMMANDS.find(s => s.instruction === instruction)?.label}"` },
     ]);
   };
 
@@ -242,7 +250,8 @@ export default function Landing() {
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         if (res.status === 429) throw new Error("QUOTA_EXCEEDED");
-        throw new Error(errorData.message || "API_ERROR");
+        if (res.status === 401) throw new Error(errorData.error || "INVALID_API_KEY");
+        throw new Error(errorData.error || errorData.message || "API_ERROR");
       }
       const data = await res.json();
 
@@ -264,9 +273,16 @@ export default function Landing() {
       });
     } catch (err) {
       console.error("Frontend error:", err);
-      const errorMessage = err.message === "QUOTA_EXCEEDED"
-        ? "⚠️ Quota exceeded! Please wait about 30 seconds before sending another message."
-        : "❌ Something went wrong. Please try again.";
+      let errorMessage = "Something went wrong. Please try again.";
+      if (err.message === "QUOTA_EXCEEDED") {
+        errorMessage = "Quota exceeded! Please wait about 30 seconds before sending another message.";
+      } else if (err.message === "INVALID_API_KEY" || (err.message && (err.message.includes("API Key") || err.message.includes("GROQ_API_KEY")))) {
+        errorMessage = err.message.includes("GROQ_API_KEY") 
+          ? err.message 
+          : "Invalid or missing Groq API Key. Please verify your GROQ_API_KEY in backend/.env.";
+      } else if (err.message && err.message !== "API_ERROR") {
+        errorMessage = err.message;
+      }
       setMessages((prev) => [...prev, { role: "assistant", content: errorMessage }]);
     } finally {
       setLoading(false);
@@ -324,9 +340,12 @@ export default function Landing() {
 
       {/* Header */}
       <div className="flex-shrink-0 border-b-4 border-black px-6 py-5 flex items-center justify-between" style={{ background: "#fff" }}>
-        <div className="relative">
-          <h1 className="text-3xl font-black tracking-tight uppercase">🧠 Gen AI Assistant</h1>
-          <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+        <div className="flex items-center gap-3.5">
+          <AppLogo size={42} />
+          <div className="relative">
+            <h1 className="text-3xl font-black tracking-tight uppercase">Gen AI Assistant</h1>
+            <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+          </div>
         </div>
         {!isLoggedIn && (
           <BrutalistButton variant="indigo" onClick={() => navigate("/login")}>Login</BrutalistButton>
@@ -383,8 +402,9 @@ export default function Landing() {
                       </span>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
-                        className="text-sm font-black ml-4 hover:scale-110 transition-transform opacity-60 hover:opacity-100"
-                      >✕</button>
+                        className="p-1 hover:scale-110 transition-transform opacity-60 hover:opacity-100 flex items-center justify-center cursor-pointer"
+                        title="Delete chat"
+                      ><CrossIcon size={11} /></button>
                     </div>
                   )}
                 </div>
@@ -425,10 +445,14 @@ export default function Landing() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-8 space-y-6">
             {messages.length === 0 ? (
-              <div className="text-center mt-20">
-                <div className="text-8xl mb-6">🤖</div>
+              <div className="text-center mt-12 flex flex-col items-center">
+                <div className="mb-6">
+                  <RobotIllustration size={100} />
+                </div>
                 <h3 className="text-3xl font-black uppercase mb-3 tracking-tight">Start a Conversation</h3>
-                <p className="font-medium" style={{ color: "#6b7280" }}>Ask anything and continue chatting naturally!</p>
+                <p className="font-medium max-w-md mx-auto" style={{ color: "#6b7280" }}>
+                  Ask questions, summarize web content, and test your knowledge with interactive quizzes!
+                </p>
               </div>
             ) : (
               messages.map((msg, i) => {
@@ -436,8 +460,9 @@ export default function Landing() {
                 if (msg.role === "system-note") {
                   return (
                     <div key={i} className="flex justify-center">
-                      <span className="text-xs font-bold uppercase tracking-widest px-4 py-2 border-2 border-black"
+                      <span className="text-xs font-bold uppercase tracking-widest px-4 py-2 border-2 border-black flex items-center gap-2"
                         style={{ background: "#fef3c7", color: "#92400e" }}>
+                        <SlidersIcon size={13} />
                         {msg.content}
                       </span>
                     </div>
@@ -476,17 +501,21 @@ export default function Landing() {
                           <button
                             onClick={() => handleFeedback(msg.messageId, 1)}
                             disabled={!!rated}
-                            title="Thumbs up"
-                            className={`text-lg px-2 py-0.5 border-2 border-black transition-all duration-150
-                              ${rated === 1 ? "bg-emerald-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "hover:bg-emerald-100 cursor-pointer"}`}
-                          >👍</button>
+                            title="Helpful"
+                            className={`p-2 border-2 border-black transition-all duration-150 flex items-center justify-center
+                              ${rated === 1 ? "bg-emerald-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "bg-white hover:bg-emerald-100 cursor-pointer"}`}
+                          >
+                            <ThumbUpIcon size={14} />
+                          </button>
                           <button
                             onClick={() => handleFeedback(msg.messageId, -1)}
                             disabled={!!rated}
-                            title="Thumbs down"
-                            className={`text-lg px-2 py-0.5 border-2 border-black transition-all duration-150
-                              ${rated === -1 ? "bg-rose-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "hover:bg-rose-100 cursor-pointer"}`}
-                          >👎</button>
+                            title="Not helpful"
+                            className={`p-2 border-2 border-black transition-all duration-150 flex items-center justify-center
+                              ${rated === -1 ? "bg-rose-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "bg-white hover:bg-rose-100 cursor-pointer"}`}
+                          >
+                            <ThumbDownIcon size={14} />
+                          </button>
                           {rated && (
                             <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "#6b7280" }}>
                               {rated === 1 ? "Thanks!" : "Got it — improving..."}
@@ -509,10 +538,11 @@ export default function Landing() {
             <div className="mb-3 flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setShowSteer((v) => !v)}
-                className="text-xs font-black uppercase tracking-widest px-3 py-1.5 border-2 border-black transition-all cursor-pointer hover:bg-black hover:text-white"
+                className="text-xs font-black uppercase tracking-widest px-3 py-1.5 border-2 border-black transition-all cursor-pointer hover:bg-black hover:text-white flex items-center gap-1.5"
                 style={steerInstruction ? { background: "#4f46e5", color: "#fff" } : {}}
               >
-                🎛️ {steerInstruction ? STEER_COMMANDS.find(s => s.instruction === steerInstruction)?.label : "Style"}
+                <SlidersIcon size={13} />
+                <span>{steerInstruction ? STEER_COMMANDS.find(s => s.instruction === steerInstruction)?.label : "Style"}</span>
               </button>
               {showSteer && STEER_COMMANDS.map((s) => (
                 <button
@@ -528,10 +558,11 @@ export default function Landing() {
               {steerInstruction && (
                 <button
                   onClick={() => { setSteerInstruction(null); setShowSteer(false); }}
-                  className="text-xs font-bold uppercase tracking-wide px-3 py-1.5 border-2 border-black cursor-pointer hover:bg-rose-50"
+                  className="text-xs font-bold uppercase tracking-wide px-3 py-1.5 border-2 border-black cursor-pointer hover:bg-rose-50 flex items-center gap-1"
                   style={{ background: "#fff1f2", color: "#b91c1c" }}
                 >
-                  ✕ Clear
+                  <CrossIcon size={10} />
+                  <span>Clear</span>
                 </button>
               )}
             </div>

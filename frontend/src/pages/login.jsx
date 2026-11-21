@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AppLogo, CheckIcon, CrossIcon } from '../components/BrutalistIcons.jsx';
 import googleLogo from '../assets/google.png';
 
 export default function LoginPage() {
@@ -66,9 +67,12 @@ export default function LoginPage() {
 
       {/* Header */}
       <div className="border-b-4 border-black px-6 py-5 flex items-center justify-between" style={{ background: "#fff" }}>
-        <div className="relative">
-          <h1 className="text-3xl font-black tracking-tight uppercase">🧠 Gen AI Assistant</h1>
-          <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+        <div className="flex items-center gap-3.5">
+          <AppLogo size={38} />
+          <div className="relative">
+            <h1 className="text-3xl font-black tracking-tight uppercase">Gen AI Assistant</h1>
+            <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+          </div>
         </div>
         <button
           onClick={() => navigate('/')}
@@ -110,15 +114,17 @@ export default function LoginPage() {
           <div className="border-2 border-t-0 border-black p-8" style={{ background: "#eef0ff" }}>
 
             {error && (
-              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide"
+              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide flex items-center gap-2"
                 style={{ borderColor: "#ef4444", background: "#fef2f2", color: "#b91c1c" }}>
-                ❌ {error}
+                <CrossIcon size={14} />
+                <span>{error}</span>
               </div>
             )}
             {success && (
-              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide"
+              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide flex items-center gap-2"
                 style={{ borderColor: "#10b981", background: "#f0fdf4", color: "#065f46" }}>
-                ✅ {success}
+                <CheckIcon size={14} />
+                <span>{success}</span>
               </div>
             )}
 

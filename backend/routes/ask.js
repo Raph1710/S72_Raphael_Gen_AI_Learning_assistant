@@ -113,7 +113,7 @@ router.post("/ask", async (req, res) => {
     // 1️⃣ Zero-shot: only question provided
     if (question && !url && !content && !prompt) {
       finalPrompt = `Answer the following question clearly and concisely, using unordered (•) and ordered (1., 2., 3.) lists when appropriate. 
-      Use minimal and relevant emojis to highlight points. 
+      Do not use emojis. Keep the formatting clean and readable. 
       Question: ${question}`;
     }
     // 2️⃣ If prompt provided
@@ -125,7 +125,7 @@ router.post("/ask", async (req, res) => {
           webContent = await fetchWebContent(extractedUrl);
           const userQuestion = prompt.replace(/\nBased on this URL: https?:\/\/[^\s\n]+/, '');
           finalPrompt = `Read the following webpage content and answer the question clearly. 
-          Use unordered (•) and ordered (1., 2., 3.) lists for readability, and sprinkle minimal, relevant emojis. 
+          Use unordered (•) and ordered (1., 2., 3.) lists for readability. Do not use emojis. 
           Do not invent false or fake information but certainly add relevant information and details if needed.
           Webpage Content: ${webContent}
           Question: ${userQuestion}`;
@@ -139,7 +139,7 @@ router.post("/ask", async (req, res) => {
         const providedContent = parts[1]?.trim() || "";
 
         finalPrompt = `Use the following content to answer the question clearly and in a structured way. 
-        Use unordered (•) and ordered (1., 2., 3.) lists, and minimal relevant emojis to make the answer easier to read. 
+        Use unordered (•) and ordered (1., 2., 3.) lists to make the answer easier to read. Do not use emojis. 
         Content: ${providedContent}
         Question: ${userQuestion}`;
       } else {
@@ -165,7 +165,7 @@ router.post("/ask", async (req, res) => {
       }
 
       finalPrompt = `Read the following information and answer the question clearly.
-      Use unordered (•) and ordered (1., 2., 3.) lists, with minimal emojis to highlight important points.
+      Use unordered (•) and ordered (1., 2., 3.) lists to highlight important points. Do not use emojis.
       ${contextData}
       Question: ${question}`;
     }
@@ -203,11 +203,13 @@ router.post("/ask", async (req, res) => {
     res.json({ answer, sessionId, messageId });
   } catch (err) {
     console.error("Ask route error:", err);
-    // Pass through 429 quota errors so the frontend can show the right message
     if (err.status === 429 || (err.message && err.message.includes("429"))) {
       return res.status(429).json({ error: "Quota exceeded. Please wait before sending another message." });
     }
-    res.status(500).json({ error: err.message });
+    if (err.status === 401 || (err.message && (err.message.includes("401") || err.message.includes("API Key") || err.message.includes("invalid_api_key")))) {
+      return res.status(401).json({ error: "Invalid or missing GROQ_API_KEY. Please verify your API key in backend/.env." });
+    }
+    res.status(500).json({ error: err.message || "An error occurred while generating the response." });
   }
 });
 
@@ -310,7 +312,10 @@ ${webContent.substring(0, 8000)}`;
     if (err.status === 429 || (err.message && err.message.includes("429"))) {
       return res.status(429).json({ error: "Quota exceeded. Please wait before sending another message." });
     }
-    res.status(500).json({ error: err.message });
+    if (err.status === 401 || (err.message && (err.message.includes("401") || err.message.includes("API Key") || err.message.includes("invalid_api_key")))) {
+      return res.status(401).json({ error: "Invalid or missing GROQ_API_KEY. Please verify your API key in backend/.env." });
+    }
+    res.status(500).json({ error: err.message || "Failed to generate quiz." });
   }
 });
 
