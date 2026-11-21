@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import askRoute from "./routes/ask.js";
 import authRoutes from "./routes/auth.js";
+import feedbackRoutes from "./routes/feedback.js";
 
 dotenv.config();
 const app = express();
@@ -28,7 +29,8 @@ app.use(express.json());
 
 // Routes
 app.use("/api", askRoute);
-app.use("/api/auth", authRoutes); 
+app.use("/api/auth", authRoutes);
+app.use("/api", feedbackRoutes);
 
 app.get("/", (req, res) => {
   res.send("✅ Backend is running!");

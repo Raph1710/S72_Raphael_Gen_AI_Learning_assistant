@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import googleLogo from '../assets/google.png';
 
@@ -12,47 +12,24 @@ export default function LoginPage() {
   const [success, setSuccess] = useState('');
   const navigate = useNavigate();
 
-  // API endpoint base URL
-  //http://localhost:5000/api/
-  //https://s72-raphael-gen-ai-learning-assistant.onrender.com/api
-  const API_BASE_URL = `https://s72-raphael-gen-ai-learning-assistant.onrender.com/api`;
+  const API_BASE_URL = 'http://localhost:5000/api';
 
   const handleLogin = async () => {
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
+    setLoading(true); setError(''); setSuccess('');
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
-      }
-
+      if (!response.ok) throw new Error(data.message || 'Login failed');
       setSuccess('Login successful!');
-      console.log('Login successful:', data);
-
-      //Store token and redirect
       if (data.token) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user || {}));
       }
-
-      setTimeout(() => {
-        navigate('/'); //Redirect to home after short delay
-      }, 1000);
-
+      setTimeout(() => navigate('/'), 1000);
     } catch (err) {
       setError(err.message || 'An error occurred during login');
     } finally {
@@ -61,37 +38,17 @@ export default function LoginPage() {
   };
 
   const handleSignup = async () => {
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
+    setLoading(true); setError(''); setSuccess('');
     try {
       const response = await fetch(`${API_BASE_URL}/auth/signup`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username,
-          email,
-          password,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email, password }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Signup failed');
-      }
-
-      setSuccess('Account created successfully! Please login.');
-      console.log('Signup successful:', data);
-
-      setTimeout(() => {
-        setIsLogin(true);
-        setSuccess('');
-      }, 2000);
-
+      if (!response.ok) throw new Error(data.message || 'Signup failed');
+      setSuccess('Account created! Please login.');
+      setTimeout(() => { setIsLogin(true); setSuccess(''); }, 2000);
     } catch (err) {
       setError(err.message || 'An error occurred during signup');
     } finally {
@@ -99,165 +56,142 @@ export default function LoginPage() {
     }
   };
 
-  const handleSubmit = () => {
-    if (isLogin) {
-      handleLogin();
-    } else {
-      handleSignup();
-    }
-  };
+  const handleSubmit = () => isLogin ? handleLogin() : handleSignup();
+  const handleKeyDown = (e) => { if (e.key === 'Enter') handleSubmit(); };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleSubmit();
-    }
-  };
+  const inputClass = "w-full p-4 text-lg font-bold text-black bg-white border-4 border-black outline-none transition-all duration-300 shadow-[5px_5px_0_#4f46e5] placeholder:text-gray-400 focus:border-indigo-600";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-indigo-900 flex items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-xl sm:text-2xl font-bold text-indigo-400 whitespace-nowrap">
-            🧠 Gen AI Reading Assistant
-          </h1>
-          <p className="text-gray-400">Your intelligent document companion</p>
-        </div>
+    <div className="min-h-screen text-black flex flex-col" style={{ background: "#faf7f2" }}>
 
-        {/* Login/Signup Card */}
-        <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 overflow-hidden">
-          {/* Tab Switcher */}
-          <div className="flex border-b border-gray-700">
+      {/* Header */}
+      <div className="border-b-4 border-black px-6 py-5 flex items-center justify-between" style={{ background: "#fff" }}>
+        <div className="relative">
+          <h1 className="text-3xl font-black tracking-tight uppercase">🧠 Gen AI Assistant</h1>
+          <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
+        </div>
+        <button
+          onClick={() => navigate('/')}
+          className="group relative inline-block border-2 border-black bg-transparent font-bold text-[13px] tracking-[0.05em] px-8 py-4 transition-all duration-300 hover:bg-black hover:text-white text-black uppercase cursor-pointer overflow-visible"
+        >
+          <span className="absolute top-1/2 left-6 h-[2px] w-6 bg-black -translate-y-1/2 transition-all duration-300 group-hover:w-4 group-hover:bg-white"></span>
+          <span className="block pl-8 text-left text-[15px] transition-all duration-300 group-hover:pl-6">Back</span>
+        </button>
+      </div>
+
+      {/* Main */}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
+
+          {/* Tab switcher */}
+          <div className="flex border-2 border-black">
             <button
-              onClick={() => {
-                setIsLogin(true);
-                setError('');
-                setSuccess('');
-              }}
-              className={`flex-1 py-4 text-center font-semibold transition-all duration-200 ${
-                isLogin
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-750'
-              }`}
+              onClick={() => { setIsLogin(true); setError(''); setSuccess(''); }}
+              className="flex-1 py-4 font-black uppercase text-sm tracking-wide transition-all duration-200 text-white"
+              style={isLogin ? { background: "#4f46e5" } : { background: "#e0e4ff", color: "#1e1b4b" }}
+              onMouseEnter={(e) => { if (!isLogin) e.target.style.background = "#c7d2fe"; }}
+              onMouseLeave={(e) => { if (!isLogin) e.target.style.background = "#e0e4ff"; }}
             >
               Login
             </button>
+            <div className="w-[2px] bg-black"></div>
             <button
-              onClick={() => {
-                setIsLogin(false);
-                setError('');
-                setSuccess('');
-              }}
-              className={`flex-1 py-4 text-center font-semibold transition-all duration-200 ${
-                !isLogin
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-750'
-              }`}
+              onClick={() => { setIsLogin(false); setError(''); setSuccess(''); }}
+              className="flex-1 py-4 font-black uppercase text-sm tracking-wide transition-all duration-200"
+              style={!isLogin ? { background: "#4f46e5", color: "#fff" } : { background: "#e0e4ff", color: "#1e1b4b" }}
+              onMouseEnter={(e) => { if (isLogin) e.target.style.background = "#c7d2fe"; }}
+              onMouseLeave={(e) => { if (isLogin) e.target.style.background = "#e0e4ff"; }}
             >
               Sign Up
             </button>
           </div>
 
-          {/* Form Content */}
-          <div className="p-8">
+          {/* Card */}
+          <div className="border-2 border-t-0 border-black p-8" style={{ background: "#eef0ff" }}>
+
             {error && (
-              <div className="mb-6 p-4 bg-red-900 bg-opacity-50 border border-red-700 rounded-xl text-red-200 text-sm">
-                {error}
+              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide"
+                style={{ borderColor: "#ef4444", background: "#fef2f2", color: "#b91c1c" }}>
+                ❌ {error}
               </div>
             )}
-
             {success && (
-              <div className="mb-6 p-4 bg-green-900 bg-opacity-50 border border-green-700 rounded-xl text-green-200 text-sm">
-                {success}
+              <div className="mb-6 p-4 border-2 font-bold text-sm uppercase tracking-wide"
+                style={{ borderColor: "#10b981", background: "#f0fdf4", color: "#065f46" }}>
+                ✅ {success}
               </div>
             )}
 
-            <div onKeyPress={handleKeyPress}>
+            <div onKeyDown={handleKeyDown}>
               {!isLogin && (
-                <div className="mb-6">
-                  <label className="block text-gray-300 text-sm font-medium mb-2">
-                    Username
-                  </label>
+                <div className="relative font-mono mb-8">
                   <input
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all"
                     placeholder="Enter your username"
-                    required
+                    className={inputClass}
                   />
+                  <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>
+                    USERNAME
+                  </label>
                 </div>
               )}
 
-              <div className="mb-6">
-                <label className="block text-gray-300 text-sm font-medium mb-2">
-                  Email
-                </label>
+              <div className="relative font-mono mb-8">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all"
                   placeholder="Enter your email"
-                  required
+                  className={inputClass}
                 />
+                <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>
+                  EMAIL
+                </label>
               </div>
 
-              <div className="mb-6">
-                <label className="block text-gray-300 text-sm font-medium mb-2">
-                  Password
-                </label>
+              <div className="relative font-mono mb-8">
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-900 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all"
                   placeholder="Enter your password"
-                  required
+                  className={inputClass}
                 />
+                <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>
+                  PASSWORD
+                </label>
               </div>
-
-              {isLogin && (
-                <div className="mb-6 text-right">
-                  <button
-                    type="button"
-                    className="text-indigo-400 text-sm hover:text-indigo-300 transition-colors"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-              )}
 
               <button
                 onClick={handleSubmit}
                 disabled={loading}
-                className={`w-full py-3 px-6 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-500 hover:shadow-lg transform hover:scale-105 transition-all duration-200 ${
-                  loading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+                className={`w-full py-4 border-2 border-black font-black uppercase text-sm tracking-widest transition-all duration-200 text-white
+                  ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-90'}`}
+                style={{ background: loading ? "#a5b4fc" : "#4f46e5" }}
               >
                 {loading ? 'Processing...' : isLogin ? 'Login' : 'Create Account'}
               </button>
             </div>
 
             {/* Divider */}
-            <div className="my-6 flex items-center">
-              <div className="flex-1 border-t border-gray-600"></div>
-              <span className="px-4 text-gray-500 text-sm">or</span>
-              <div className="flex-1 border-t border-gray-600"></div>
+            <div className="my-6 flex items-center gap-4">
+              <div className="flex-1 h-[2px] bg-black"></div>
+              <span className="font-bold text-sm uppercase tracking-widest">or</span>
+              <div className="flex-1 h-[2px] bg-black"></div>
             </div>
 
-            {/* Social Login Buttons */}
-            <div className="space-y-3">
-              <button className="w-full py-3 px-6 bg-gray-700 text-white font-medium rounded-xl hover:bg-gray-600 transition-all duration-200 flex items-center justify-center gap-2">
-                <img src={googleLogo} alt="Google" className="w-5 h-5" /> Continue with Google
-              </button>
-            </div>
+            {/* Google */}
+            <button className="w-full py-4 border-2 border-black bg-white font-bold uppercase text-sm tracking-wide hover:bg-indigo-50 transition-all duration-200 flex items-center justify-center gap-3 cursor-pointer">
+              <img src={googleLogo} alt="Google" className="w-5 h-5" />
+              Continue with Google
+            </button>
           </div>
-        </div>
 
-        {/* Footer */}
-        <div className="text-center mt-6 text-gray-500 text-sm">
-          <p>By continuing, you agree to our Terms of Service and Privacy Policy</p>
+          <p className="text-center mt-4 text-xs font-bold uppercase tracking-wide" style={{ color: "#6b7280" }}>
+            By continuing, you agree to our Terms of Service and Privacy Policy
+          </p>
         </div>
       </div>
     </div>

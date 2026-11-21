@@ -1,5 +1,40 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+
+// Normalise LLM output so inline • bullets become proper markdown list items.
+function normalizeLLMMarkdown(text) {
+  if (!text) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (!line.trimStart().startsWith("•") && line.includes("•")) {
+        const [intro, ...parts] = line.split("•");
+        const items = parts.map((p) => p.trim()).filter(Boolean);
+        if (items.length > 0) {
+          const introText = intro.trim();
+          const listLines = items.map((item) => `- ${item}`).join("\n");
+          return introText ? `${introText}\n${listLines}` : listLines;
+        }
+      }
+      if (line.trimStart().startsWith("•")) {
+        return line.replace(/^(\s*)•\s*/, "$1- ");
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+// Steer commands — plain-English phrases the user can click to modify LLM behaviour
+const STEER_COMMANDS = [
+  { label: "Shorter", instruction: "Keep your answers brief and to the point. No long paragraphs." },
+  { label: "More detail", instruction: "Provide thorough, detailed answers with full explanations." },
+  { label: "Add examples", instruction: "Always include practical, concrete examples in your answers." },
+  { label: "ELI5", instruction: "Explain everything as if I am 12 years old. Use simple language." },
+  { label: "Bullet points", instruction: "Always format answers as bullet points. Avoid prose paragraphs." },
+];
+
+const API = "http://localhost:5000/api";
 
 export default function Landing() {
   const [mode, setMode] = useState("url");
@@ -9,7 +44,7 @@ export default function Landing() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(false);
+  const [userId, setUserId] = useState(null);
   const chatEndRef = useRef(null);
   const sidebarRef = useRef(null);
   const navigate = useNavigate();
@@ -20,329 +55,309 @@ export default function Landing() {
   const [editedName, setEditedName] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // ✅ Scroll to bottom when messages update
+  // Feedback state: { [messageId]: 1 | -1 }
+  const [feedbackMap, setFeedbackMap] = useState({});
+  // Active steer instruction for this session
+  const [steerInstruction, setSteerInstruction] = useState(null);
+  const [showSteer, setShowSteer] = useState(false);
+
+  // ── Scroll to bottom ───────────────────────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ✅ INITIAL LOAD: Load all data from localStorage once on mount
+  // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     try {
       const savedChats = JSON.parse(localStorage.getItem("chats") || "[]");
       const savedCurrentId = localStorage.getItem("currentChatId");
       const savedUrl = localStorage.getItem("landing_url") || "";
       const savedContent = localStorage.getItem("landing_content") || "";
-
-      // Set all state
       setChats(savedChats);
       setUrl(savedUrl);
       setContent(savedContent);
-
-      // Restore current chat if it exists
       if (savedCurrentId && savedChats.length > 0) {
         const activeChat = savedChats.find((c) => c.id === savedCurrentId);
         if (activeChat) {
           setCurrentChatId(savedCurrentId);
           setMessages(activeChat.messages || []);
-
-          // Scroll to active chat in sidebar
           setTimeout(() => {
-            const activeEl = document.getElementById(`chat-${savedCurrentId}`);
-            activeEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+            document.getElementById(`chat-${savedCurrentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
           }, 200);
         }
       }
-
       setIsInitialized(true);
     } catch (e) {
       console.error("Failed to load chats:", e);
     }
-  }, []);
 
-  // ✅ Save chats array to localStorage whenever it changes (after initialization)
-  useEffect(() => {
-    if (!isInitialized) return;
-    localStorage.setItem("chats", JSON.stringify(chats));
-  }, [chats, isInitialized]);
-
-  // ✅ Save current chat ID whenever it changes
-  useEffect(() => {
-    if (!isInitialized) return;
-    if (currentChatId) {
-      localStorage.setItem("currentChatId", currentChatId);
-    } else {
-      localStorage.removeItem("currentChatId");
-    }
-  }, [currentChatId, isInitialized]);
-
-  // ✅ Save URL and content whenever they change
-  useEffect(() => {
-    if (!isInitialized) return;
-    localStorage.setItem("landing_url", url || "");
-  }, [url, isInitialized]);
-
-  useEffect(() => {
-    if (!isInitialized) return;
-    localStorage.setItem("landing_content", content || "");
-  }, [content, isInitialized]);
-
-  // ✅ Sync messages into current chat whenever messages change
-  useEffect(() => {
-    if (!isInitialized || !currentChatId) return;
-
-    setChats((prevChats) => {
-      const chatExists = prevChats.find((c) => c.id === currentChatId);
-      if (!chatExists) return prevChats;
-
-      return prevChats.map((chat) =>
-        chat.id === currentChatId ? { ...chat, messages } : chat
-      );
-    });
-  }, [messages, currentChatId, isInitialized]);
-
-  // ✅ Check login status
-  useEffect(() => {
+    // Load user identity
     const token = localStorage.getItem("token");
     if (token) {
       setIsLoggedIn(true);
-      setShowWelcome(true);
-      const timer = setTimeout(() => setShowWelcome(false), 3000);
-      return () => clearTimeout(timer);
+      try {
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        if (user.id) setUserId(user.id);
+      } catch {}
     }
   }, []);
 
-  // ✅ Create new chat
+  // ── Persistence effects ────────────────────────────────────────────────────
+  useEffect(() => { if (!isInitialized) return; localStorage.setItem("chats", JSON.stringify(chats)); }, [chats, isInitialized]);
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (currentChatId) localStorage.setItem("currentChatId", currentChatId);
+    else localStorage.removeItem("currentChatId");
+  }, [currentChatId, isInitialized]);
+  useEffect(() => { if (!isInitialized) return; localStorage.setItem("landing_url", url || ""); }, [url, isInitialized]);
+  useEffect(() => { if (!isInitialized) return; localStorage.setItem("landing_content", content || ""); }, [content, isInitialized]);
+  useEffect(() => {
+    if (!isInitialized || !currentChatId) return;
+    setChats((prev) => {
+      const exists = prev.find((c) => c.id === currentChatId);
+      if (!exists) return prev;
+      return prev.map((c) => c.id === currentChatId ? { ...c, messages } : c);
+    });
+  }, [messages, currentChatId, isInitialized]);
+
+  // ── Chat management ────────────────────────────────────────────────────────
   const handleNewChat = () => {
-    const newChat = {
-      id: Date.now().toString(),
-      name: `Chat ${chats.length + 1}`,
-      messages: [],
-    };
+    const newChat = { id: Date.now().toString(), name: `Chat ${chats.length + 1}`, messages: [] };
     setChats((prev) => [...prev, newChat]);
     setCurrentChatId(newChat.id);
     setMessages([]);
   };
 
-  // ✅ Switch to a different chat
   const handleSelectChat = (id) => {
     const chat = chats.find((c) => c.id === id);
     if (chat) {
       setCurrentChatId(id);
       setMessages(chat.messages || []);
-      setTimeout(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 150);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 150);
     }
   };
 
-  // ✅ Delete a chat
   const handleDeleteChat = (id) => {
     const updated = chats.filter((c) => c.id !== id);
     setChats(updated);
-
     if (id === currentChatId) {
-      const nextChat = updated[0] || null;
-      setCurrentChatId(nextChat?.id || null);
-      setMessages(nextChat?.messages || []);
+      const next = updated[0] || null;
+      setCurrentChatId(next?.id || null);
+      setMessages(next?.messages || []);
     }
   };
 
-  // ✅ Start editing chat name
-  const handleEditChatName = (chat) => {
-    setEditingChatId(chat.id);
-    setEditedName(chat.name);
-  };
-
-  // ✅ Save edited chat name
+  const handleEditChatName = (chat) => { setEditingChatId(chat.id); setEditedName(chat.name); };
   const handleSaveChatName = (chatId) => {
-    const updated = chats.map((c) =>
-      c.id === chatId ? { ...c, name: editedName.trim() || c.name } : c
-    );
-    setChats(updated);
+    setChats((prev) => prev.map((c) => c.id === chatId ? { ...c, name: editedName.trim() || c.name } : c));
     setEditingChatId(null);
   };
 
-  // ✅ Handle quiz button click
   const handleQuizClick = (e) => {
     e.preventDefault();
-    if (isLoggedIn) {
-      navigate("/quiz", { state: { url: url || "", content: content || "" } });
-    } else {
-      navigate("/login");
+    navigate(isLoggedIn ? "/quiz" : "/login", { state: { url: url || "", content: content || "" } });
+  };
+
+  // ── Feedback ───────────────────────────────────────────────────────────────
+  const handleFeedback = async (messageId, rating) => {
+    if (!messageId || feedbackMap[messageId]) return; // already rated
+    setFeedbackMap((prev) => ({ ...prev, [messageId]: rating }));
+    try {
+      await fetch(`${API}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, rating, userId }),
+      });
+    } catch (err) {
+      console.error("Feedback error:", err);
     }
   };
 
-  // ✅ Send message to backend
+  // ── Steer ──────────────────────────────────────────────────────────────────
+  const handleSteer = (instruction) => {
+    setSteerInstruction(instruction);
+    setShowSteer(false);
+    // Inject a visible system note into the chat
+    setMessages((prev) => [
+      ...prev,
+      { role: "system-note", content: `🎛️ Style updated: "${STEER_COMMANDS.find(s => s.instruction === instruction)?.label}"` },
+    ]);
+  };
+
+  // ── Chat name generation ───────────────────────────────────────────────────
+  const generateChatName = async (answer) => {
+    try {
+      const res = await fetch(`${API}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: `In 4 words or fewer, give a concise topic title that summarizes this response (no punctuation, no quotes, no explanation): "${answer.slice(0, 500)}"`,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.answer?.trim().replace(/^["']|["']$/g, "").slice(0, 40) || null;
+    } catch { return null; }
+  };
+
+  // ── Send message ───────────────────────────────────────────────────────────
   const handleSend = async (e) => {
     if (e) e.preventDefault();
     if (!input.trim()) return;
 
-    const newMessage = { role: "user", content: input.trim() };
-    const updatedMessages = [...messages, newMessage];
+    let activeChatId = currentChatId;
+    if (!activeChatId) {
+      const newChat = { id: Date.now().toString(), name: "New Chat", messages: [] };
+      setChats((prev) => [...prev, newChat]);
+      setCurrentChatId(newChat.id);
+      activeChatId = newChat.id;
+    }
+
+    const questionText = input.trim();
+    const updatedMessages = [...messages, { role: "user", content: questionText }];
     setMessages(updatedMessages);
     setInput("");
     setLoading(true);
 
     try {
       let systemContext = "";
-      if (mode === "url" && url.trim()) {
-        systemContext = `Based on this URL: ${url.trim()}`;
-      }
-      if (mode === "text" && content.trim()) {
-        systemContext = `Based on this content: ${content.trim()}`;
-      }
+      if (mode === "url" && url.trim()) systemContext = `Based on this URL: ${url.trim()}`;
+      if (mode === "text" && content.trim()) systemContext = `Based on this content: ${content.trim()}`;
 
-      const payload = {
-        question: input.trim(),
-        context: systemContext,
-      };
-      //http://localhost:5000/api/ask
-      //https://s72-raphael-gen-ai-learning-assistant.onrender.com/api/ask
-      const res = await fetch("https://s72-raphael-gen-ai-learning-assistant.onrender.com/api/ask", {
+      // Combine steer instruction into the question if active
+      const effectiveQuestion = steerInstruction
+        ? `[Instruction: ${steerInstruction}]\n\n${questionText}`
+        : questionText;
+
+      const res = await fetch(`${API}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          question: effectiveQuestion,
+          context: systemContext,
+          userId,
+        }),
       });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        // If it's a 429, throw a specific message, otherwise use the generic error
-        if (res.status === 429) {
-          throw new Error("QUOTA_EXCEEDED");
-        }
+        if (res.status === 429) throw new Error("QUOTA_EXCEEDED");
         throw new Error(errorData.message || "API_ERROR");
       }
       const data = await res.json();
 
       const finalMessages = [
         ...updatedMessages,
-        { role: "assistant", content: data.answer || "No response" },
+        { role: "assistant", content: data.answer || "No response", messageId: data.messageId },
       ];
       setMessages(finalMessages);
-    } catch (err) {
-  console.error("Frontend error:", err);
-  
-  let errorMessage = "❌ Something went wrong. Please try again.";
-  
-  if (err.message === "QUOTA_EXCEEDED") {
-    errorMessage = "⚠️ Quota exceeded! The free AI tier is exhausted. Please wait about 30 seconds before sending another message.";
-  }
 
-  setMessages((prev) => [
-    ...prev,
-    { role: "assistant", content: errorMessage },
-  ]);
-  }finally {
+      // Auto-name new chat
+      setChats((prev) => {
+        const chat = prev.find((c) => c.id === activeChatId);
+        if (chat && chat.name === "New Chat") {
+          generateChatName(data.answer || "").then((name) => {
+            if (name) setChats((latest) => latest.map((c) => c.id === activeChatId ? { ...c, name } : c));
+          });
+        }
+        return prev;
+      });
+    } catch (err) {
+      console.error("Frontend error:", err);
+      const errorMessage = err.message === "QUOTA_EXCEEDED"
+        ? "⚠️ Quota exceeded! Please wait about 30 seconds before sending another message."
+        : "❌ Something went wrong. Please try again.";
+      setMessages((prev) => [...prev, { role: "assistant", content: errorMessage }]);
+    } finally {
       setLoading(false);
     }
   };
 
-  const BrutalistButton = ({ children, onClick, disabled = false }) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`
-        group relative inline-block overflow-visible 
-        border-2 border-black bg-transparent font-bold text-[13px]
-        tracking-[0.05em] px-8 py-4 transition-all duration-300 ease-in-out
-        hover:bg-black hover:text-white
-        ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
-        text-black uppercase
-      `}
-    >
-      <span className="absolute top-1/2 left-6 h-[2px] w-6 bg-black -translate-y-1/2 transition-all duration-300 group-hover:w-4 group-hover:bg-white"></span>
-      <span className="absolute top-[-2px] left-[10px] h-[2px] w-6 bg-gray-300 transition-all duration-500 ease-out group-hover:left-[-2px] group-hover:w-0"></span>
-      <span className="block pl-8 text-left text-[15px] transition-all duration-300 ease-in-out group-hover:pl-6">
-        {children}
-      </span>
-      <span className="absolute bottom-[-2px] right-[30px] h-[2px] w-6 bg-gray-300 transition-all duration-500 ease-out group-hover:right-0 group-hover:w-0"></span>
-      <span className="absolute bottom-[-2px] right-[10px] h-[2px] w-[10px] bg-gray-300 transition-all duration-500 ease-out group-hover:right-0 group-hover:w-0"></span>
-    </button>
-  );
+  // ── Shared components ──────────────────────────────────────────────────────
+  const BrutalistButton = ({ children, onClick, disabled = false, variant = "default" }) => {
+    const base = `group relative inline-block overflow-visible border-2 font-bold text-[13px]
+      tracking-[0.05em] px-8 py-4 transition-all duration-300 ease-in-out uppercase
+      ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`;
+    const variants = {
+      default: "border-black bg-transparent text-black hover:bg-black hover:text-white",
+      indigo: "border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700 hover:border-indigo-700",
+    };
+    return (
+      <button onClick={onClick} disabled={disabled} className={`${base} ${variants[variant]}`}>
+        <span className={`absolute top-1/2 left-6 h-[2px] w-6 -translate-y-1/2 transition-all duration-300 group-hover:w-4
+          ${variant === "indigo" ? "bg-white" : "bg-black group-hover:bg-white"}`}></span>
+        <span className="absolute top-[-2px] left-[10px] h-[2px] w-6 bg-gray-300 transition-all duration-500 ease-out group-hover:left-[-2px] group-hover:w-0"></span>
+        <span className="block pl-8 text-left text-[15px] transition-all duration-300 ease-in-out group-hover:pl-6">{children}</span>
+        <span className="absolute bottom-[-2px] right-[30px] h-[2px] w-6 bg-gray-300 transition-all duration-500 ease-out group-hover:right-0 group-hover:w-0"></span>
+        <span className="absolute bottom-[-2px] right-[10px] h-[2px] w-[10px] bg-gray-300 transition-all duration-500 ease-out group-hover:right-0 group-hover:w-0"></span>
+      </button>
+    );
+  };
 
-  const BrutalistInput = ({ value, onChange, placeholder, label, type = "text" }) => (
-    <div className="relative font-mono mb-4">
-      <input
-        type={type}
-        value={value || ""}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full p-4 text-lg font-bold text-black bg-stone-50 border-4 border-black outline-none transition-all duration-300 shadow-[5px_5px_0_#000,10px_10px_0_#4a90e2] focus:animate-[focus-pulse_4s_cubic-bezier(0.25,0.8,0.25,1)_infinite] placeholder:text-gray-500 focus:placeholder:text-transparent"
-        style={{ animation: 'none' }}
-        onFocus={(e) => { e.target.style.animation = 'focus-pulse 4s cubic-bezier(0.25, 0.8, 0.25, 1) infinite'; }}
-        onBlur={(e) => { e.target.style.animation = 'none'; }}
-      />
-      <label className="absolute -left-1 -top-9 text-sm font-bold text-white bg-black px-3 py-1 -rotate-1 transition-all duration-300">
-        {label}
-      </label>
-    </div>
-  );
+  const mdComponents = {
+    p: ({ children }) => <p className="mb-2 last:mb-0 font-medium leading-relaxed">{children}</p>,
+    strong: ({ children }) => <strong className="font-black">{children}</strong>,
+    em: ({ children }) => <em className="italic">{children}</em>,
+    ul: ({ children }) => <ul className="my-2 space-y-1 pl-2">{children}</ul>,
+    ol: ({ children }) => <ol className="my-2 space-y-1 pl-2 list-none">{children}</ol>,
+    li: ({ children }) => (
+      <li className="flex items-start gap-2 font-medium">
+        <span className="mt-1 flex-shrink-0 font-black" style={{ color: "#4f46e5" }}>•</span>
+        <span>{children}</span>
+      </li>
+    ),
+    h1: ({ children }) => <h1 className="text-xl font-black uppercase tracking-tight mb-2 mt-3 first:mt-0">{children}</h1>,
+    h2: ({ children }) => <h2 className="text-lg font-black uppercase tracking-tight mb-2 mt-3 first:mt-0">{children}</h2>,
+    h3: ({ children }) => <h3 className="text-base font-black uppercase tracking-tight mb-1 mt-2 first:mt-0">{children}</h3>,
+    code: ({ inline, children }) => inline
+      ? <code className="px-1.5 py-0.5 font-mono text-sm border border-black" style={{ background: "#eef0ff", color: "#4f46e5" }}>{children}</code>
+      : <pre className="my-2 p-3 font-mono text-sm border-2 border-black overflow-x-auto" style={{ background: "#1e1b4b", color: "#e0e7ff" }}><code>{children}</code></pre>,
+    blockquote: ({ children }) => <blockquote className="my-2 pl-4 border-l-4 italic font-medium" style={{ borderColor: "#f59e0b" }}>{children}</blockquote>,
+    hr: () => <hr className="my-3 border-t-2 border-black" />,
+  };
 
-  const BrutalistTextarea = ({ value, onChange, placeholder, label, rows = 3 }) => (
-    <div className="relative font-mono mb-4">
-      <textarea
-        value={value || ""}
-        onChange={onChange}
-        placeholder={placeholder}
-        rows={rows}
-        className="w-full p-4 text-lg font-bold text-black bg-stone-50 border-4 border-black outline-none transition-all duration-300 shadow-[5px_5px_0_#000,10px_10px_0_#4a90e2] focus:animate-[focus-pulse_4s_cubic-bezier(0.25,0.8,0.25,1)_infinite] placeholder:text-gray-500 focus:placeholder:text-transparent resize-none"
-        style={{ animation: 'none' }}
-        onFocus={(e) => { e.target.style.animation = 'focus-pulse 4s cubic-bezier(0.25, 0.8, 0.25, 1) infinite'; }}
-        onBlur={(e) => { e.target.style.animation = 'none'; }}
-      />
-      <label className="absolute -left-1 -top-9 text-sm font-bold text-white bg-black px-3 py-1 -rotate-1 transition-all duration-300">
-        {label}
-      </label>
-    </div>
-  );
+  const inputClass = "w-full p-4 text-lg font-bold text-black bg-white border-4 border-black outline-none transition-all duration-300 shadow-[5px_5px_0_#4f46e5] placeholder:text-gray-400 focus:border-indigo-600 resize-none";
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="h-screen bg-stone-300 text-black flex flex-col overflow-hidden relative">
+    <div className="h-screen text-black flex flex-col overflow-hidden relative" style={{ background: "#faf7f2" }}>
+
       {/* Header */}
-      <div className="flex-shrink-0 bg-stone-200 border-b-4 border-black px-6 py-6 flex items-center justify-between">
+      <div className="flex-shrink-0 border-b-4 border-black px-6 py-5 flex items-center justify-between" style={{ background: "#fff" }}>
         <div className="relative">
-          <h1 className="text-3xl font-black tracking-tight uppercase">
-            🧠 Gen AI Assistant
-          </h1>
-          <div className="absolute -bottom-1 left-0 w-24 h-1 bg-black"></div>
+          <h1 className="text-3xl font-black tracking-tight uppercase">🧠 Gen AI Assistant</h1>
+          <div className="absolute -bottom-1 left-0 w-24 h-1" style={{ background: "#f59e0b" }}></div>
         </div>
         {!isLoggedIn && (
-          <BrutalistButton onClick={() => navigate("/login")}>
-            Login
-          </BrutalistButton>
+          <BrutalistButton variant="indigo" onClick={() => navigate("/login")}>Login</BrutalistButton>
         )}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden border-t-2 border-black">
+      {/* Main */}
+      <div className="flex-1 flex overflow-hidden">
+
         {/* Sidebar */}
-        <div ref={sidebarRef} className="w-96 bg-stone-300 border-r-4 border-black flex flex-col">
-          {/* Sidebar Header */}
-          <div className="p-6 border-b-2 border-black flex justify-between items-center bg-stone-200">
+        <div ref={sidebarRef} className="w-96 border-r-4 border-black flex flex-col" style={{ background: "#eef0ff" }}>
+          <div className="p-6 border-b-2 border-black flex justify-between items-center" style={{ background: "#e0e4ff" }}>
             <h2 className="text-xl font-black uppercase tracking-tight">Chats</h2>
-            <BrutalistButton onClick={handleNewChat}>
-              New
-            </BrutalistButton>
+            <BrutalistButton variant="indigo" onClick={handleNewChat}>New</BrutalistButton>
           </div>
 
-          {/* Chat List */}
-          <div className="flex-1 overflow-y-auto bg-stone-300">
+          <div className="flex-1 overflow-y-auto">
             {chats.length === 0 ? (
-              <p className="p-6 text-gray-600 text-sm font-bold uppercase tracking-wide">No chats yet. Create one!</p>
+              <p className="p-6 text-indigo-400 text-sm font-bold uppercase tracking-wide">No chats yet. Create one!</p>
             ) : (
               chats.map((chat) => (
                 <div
                   key={chat.id}
                   id={`chat-${chat.id}`}
-                  className={`
-                    relative border-b-2 border-black px-6 py-4 cursor-pointer 
-                    transition-all duration-200 group
-                    ${chat.id === currentChatId ? "bg-black text-white" : "bg-stone-200 hover:bg-stone-100"}
-                  `}
                   onClick={() => handleSelectChat(chat.id)}
+                  className={`relative border-b-2 border-black px-6 py-4 cursor-pointer transition-all duration-200
+                    ${chat.id === currentChatId ? "text-white" : "hover:bg-indigo-50"}`}
+                  style={chat.id === currentChatId ? { background: "#4f46e5" } : {}}
                 >
                   {chat.id === currentChatId && (
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-white"></div>
+                    <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: "#f59e0b" }}></div>
                   )}
                   {editingChatId === chat.id ? (
                     <input
@@ -361,24 +376,15 @@ export default function Landing() {
                     <div className="flex justify-between items-center">
                       <span
                         className="font-bold uppercase tracking-wide text-sm flex-1 truncate"
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          handleEditChatName(chat);
-                        }}
+                        onDoubleClick={(e) => { e.stopPropagation(); handleEditChatName(chat); }}
                         title="Double-click to rename"
                       >
                         {chat.name}
                       </span>
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteChat(chat.id);
-                        }}
-                        className="text-sm font-black ml-4 hover:scale-110 transition-transform"
-                        title="Delete Chat"
-                      >
-                        ✕
-                      </button>
+                        onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
+                        className="text-sm font-black ml-4 hover:scale-110 transition-transform opacity-60 hover:opacity-100"
+                      >✕</button>
                     </div>
                   )}
                 </div>
@@ -386,85 +392,150 @@ export default function Landing() {
             )}
           </div>
 
-          {/* Mode Selection and Input */}
-          <div className="p-6 border-t-4 border-black bg-stone-200 space-y-6">
-            <div className="flex gap-0 border-2 border-black">
-              <button
-                onClick={() => setMode("url")}
-                className={`flex-1 py-3 font-bold uppercase text-sm tracking-wide transition-all duration-200 ${
-                  mode === "url" ? "bg-black text-white" : "bg-stone-200 text-black hover:bg-stone-100"
-                }`}
-              >
-                URL
-              </button>
-              <div className="w-[2px] bg-black"></div>
-              <button
-                onClick={() => setMode("text")}
-                className={`flex-1 py-3 font-bold uppercase text-sm tracking-wide transition-all duration-200 ${
-                  mode === "text" ? "bg-black text-white" : "bg-stone-200 text-black hover:bg-stone-100"
-                }`}
-              >
-                Text
-              </button>
+          {/* Mode + input */}
+          <div className="p-6 border-t-4 border-black space-y-6" style={{ background: "#e0e4ff" }}>
+            <div className="flex border-2 border-black">
+              {["url", "text"].map((m) => (
+                <button key={m} onClick={() => setMode(m)}
+                  className={`flex-1 py-3 font-bold uppercase text-sm tracking-wide transition-all duration-200 ${mode === m ? "text-white" : "text-black hover:bg-indigo-50"}`}
+                  style={mode === m ? { background: "#4f46e5" } : {}}>
+                  {m === "url" ? "URL" : "Text"}
+                </button>
+              ))}
             </div>
-
             {mode === "url" ? (
-              <BrutalistInput
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com/article"
-                label="WEBPAGE URL"
-                type="text"
-              />
+              <div className="relative font-mono mb-4">
+                <input type="text" value={url || ""} onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://example.com/article" className={inputClass} />
+                <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>WEBPAGE URL</label>
+              </div>
             ) : (
-              <BrutalistTextarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Paste full webpage content here..."
-                label="WEBPAGE CONTENT"
-                rows={5}
-              />
+              <div className="relative font-mono mb-4">
+                <textarea value={content || ""} onChange={(e) => setContent(e.target.value)}
+                  placeholder="Paste full webpage content here..." rows={5} className={inputClass} />
+                <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>WEBPAGE CONTENT</label>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col bg-stone-300">
-          {/* Messages Display */}
+        {/* Chat area */}
+        <div className="flex-1 flex flex-col" style={{ background: "#faf7f2" }}>
+
+          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-8 space-y-6">
             {messages.length === 0 ? (
               <div className="text-center mt-20">
                 <div className="text-8xl mb-6">🤖</div>
                 <h3 className="text-3xl font-black uppercase mb-3 tracking-tight">Start a Conversation</h3>
-                <p className="text-gray-600 font-medium">
-                  Ask anything and continue chatting naturally!
-                </p>
+                <p className="font-medium" style={{ color: "#6b7280" }}>Ask anything and continue chatting naturally!</p>
               </div>
             ) : (
-              messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`
-                      max-w-xl px-6 py-4 text-base font-medium border-2 border-black
-                      ${msg.role === "user"
-                        ? "bg-black text-white"
-                        : "bg-stone-50 text-black"
-                      }
-                    `}
-                  >
-                    {msg.content}
+              messages.map((msg, i) => {
+                // System note (steer confirmation)
+                if (msg.role === "system-note") {
+                  return (
+                    <div key={i} className="flex justify-center">
+                      <span className="text-xs font-bold uppercase tracking-widest px-4 py-2 border-2 border-black"
+                        style={{ background: "#fef3c7", color: "#92400e" }}>
+                        {msg.content}
+                      </span>
+                    </div>
+                  );
+                }
+
+                // User message
+                if (msg.role === "user") {
+                  return (
+                    <div key={i} className="flex justify-end">
+                      <div className="px-6 py-4 text-base border-2 border-black text-white max-w-xl"
+                        style={{ background: "#4f46e5", boxShadow: "4px 4px 0 #312e81" }}>
+                        <p className="font-medium">{msg.content}</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Assistant message
+                const rated = feedbackMap[msg.messageId];
+                return (
+                  <div key={i} className="flex justify-start">
+                    <div className="max-w-2xl">
+                      <div className="px-6 py-4 text-base border-2 border-black text-black bg-white"
+                        style={{ borderLeft: "4px solid #f59e0b", boxShadow: "4px 4px 0 #d1d5db" }}>
+                        <ReactMarkdown components={mdComponents}>
+                          {normalizeLLMMarkdown(msg.content)}
+                        </ReactMarkdown>
+                      </div>
+                      {/* Feedback row */}
+                      {msg.messageId && (
+                        <div className="flex items-center gap-2 mt-2 pl-1">
+                          <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "#9ca3af" }}>
+                            Was this helpful?
+                          </span>
+                          <button
+                            onClick={() => handleFeedback(msg.messageId, 1)}
+                            disabled={!!rated}
+                            title="Thumbs up"
+                            className={`text-lg px-2 py-0.5 border-2 border-black transition-all duration-150
+                              ${rated === 1 ? "bg-emerald-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "hover:bg-emerald-100 cursor-pointer"}`}
+                          >👍</button>
+                          <button
+                            onClick={() => handleFeedback(msg.messageId, -1)}
+                            disabled={!!rated}
+                            title="Thumbs down"
+                            className={`text-lg px-2 py-0.5 border-2 border-black transition-all duration-150
+                              ${rated === -1 ? "bg-rose-500 text-white" : rated ? "opacity-30 cursor-not-allowed" : "hover:bg-rose-100 cursor-pointer"}`}
+                          >👎</button>
+                          {rated && (
+                            <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "#6b7280" }}>
+                              {rated === 1 ? "Thanks!" : "Got it — improving..."}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             <div ref={chatEndRef} />
           </div>
 
-          {/* Message Input Area */}
-          <div className="p-6 border-t-4 border-black bg-stone-200">
+          {/* Input bar */}
+          <div className="p-6 border-t-4 border-black" style={{ background: "#fff" }}>
+
+            {/* Steer commands */}
+            <div className="mb-3 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setShowSteer((v) => !v)}
+                className="text-xs font-black uppercase tracking-widest px-3 py-1.5 border-2 border-black transition-all cursor-pointer hover:bg-black hover:text-white"
+                style={steerInstruction ? { background: "#4f46e5", color: "#fff" } : {}}
+              >
+                🎛️ {steerInstruction ? STEER_COMMANDS.find(s => s.instruction === steerInstruction)?.label : "Style"}
+              </button>
+              {showSteer && STEER_COMMANDS.map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => handleSteer(s.instruction)}
+                  className={`text-xs font-bold uppercase tracking-wide px-3 py-1.5 border-2 border-black cursor-pointer transition-all
+                    ${steerInstruction === s.instruction ? "text-white" : "hover:bg-indigo-50"}`}
+                  style={steerInstruction === s.instruction ? { background: "#4f46e5" } : { background: "#eef0ff" }}
+                >
+                  {s.label}
+                </button>
+              ))}
+              {steerInstruction && (
+                <button
+                  onClick={() => { setSteerInstruction(null); setShowSteer(false); }}
+                  className="text-xs font-bold uppercase tracking-wide px-3 py-1.5 border-2 border-black cursor-pointer hover:bg-rose-50"
+                  style={{ background: "#fff1f2", color: "#b91c1c" }}
+                >
+                  ✕ Clear
+                </button>
+              )}
+            </div>
+
             <div className="flex gap-3 items-end">
               <div className="flex-1 relative font-mono">
                 <textarea
@@ -472,38 +543,23 @@ export default function Landing() {
                   value={input || ""}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
                   }}
-                  className="w-full p-4 text-lg font-bold text-black bg-stone-50 border-4 border-black outline-none transition-all duration-300 shadow-[5px_5px_0_#000,10px_10px_0_#4a90e2] focus:animate-[focus-pulse_4s_cubic-bezier(0.25,0.8,0.25,1)_infinite] placeholder:text-gray-500 focus:placeholder:text-transparent resize-none"
+                  className={inputClass}
                   rows={2}
-                  style={{ animation: 'none' }}
-                  onFocus={(e) => { e.target.style.animation = 'focus-pulse 4s cubic-bezier(0.25, 0.8, 0.25, 1) infinite'; }}
-                  onBlur={(e) => { e.target.style.animation = 'none'; }}
                 />
-                <label className="absolute -left-1 -top-9 text-sm font-bold text-white bg-black px-3 py-1 -rotate-1 transition-all duration-300">
+                <label className="absolute -left-1 -top-9 text-sm font-bold text-white px-3 py-1 -rotate-1" style={{ background: "#4f46e5" }}>
                   MESSAGE INPUT
                 </label>
               </div>
-              <BrutalistButton onClick={handleQuizClick}>
-                Take Quiz
-              </BrutalistButton>
-              <BrutalistButton onClick={handleSend} disabled={loading || !input.trim()}>
+              <BrutalistButton onClick={handleQuizClick}>Take Quiz</BrutalistButton>
+              <BrutalistButton variant="indigo" onClick={handleSend} disabled={loading || !input.trim()}>
                 {loading ? "..." : "Send"}
               </BrutalistButton>
             </div>
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes focus-pulse {
-          0%, 100% { border-color: #000; }
-          50% { border-color: #4a90e2; }
-        }
-      `}</style>
     </div>
   );
 }

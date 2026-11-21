@@ -2,6 +2,9 @@ import express from "express";
 import { askGemini } from "../services/aiService.js";
 import axios from "axios";
 import { JSDOM } from "jsdom";
+import { randomUUID } from "crypto";
+import InteractionLog from "../model/interactionLog.js";
+import UserPreference from "../model/userPreference.js";
 
 const router = express.Router();
 
@@ -49,9 +52,9 @@ router.delete("/clear/:sessionId", (req, res) => {
 
 // 💬 Existing /ask logic — now extended with chat session context
 router.post("/ask", async (req, res) => {
-  let { question, url, content, prompt, context, sessionId } = req.body;
+  let { question, url, content, prompt, context, sessionId, userId } = req.body;
 
-  // 🔄 Handle the frontend's "context" field (e.g. "Based on this URL: ..." or "Based on this content: ...")
+  // 🔄 Handle the frontend's "context" field
   if (context && !url && !content) {
     if (context.startsWith("Based on this URL:")) {
       url = context.replace("Based on this URL:", "").trim();
@@ -65,8 +68,6 @@ router.post("/ask", async (req, res) => {
     const msgs = req.body.messages;
     const lastUserMsg = msgs.reverse().find(m => m.role === "user");
     if (lastUserMsg) question = lastUserMsg.content;
-
-    // If there's system content (URL or text), handle that
     const systemMsg = msgs.find(m => m.role === "system");
     if (systemMsg) {
       if (systemMsg.content.startsWith("Based on this URL:")) {
@@ -79,6 +80,30 @@ router.post("/ask", async (req, res) => {
 
   if (!question && !prompt) {
     return res.status(400).json({ error: "Question or prompt is required" });
+  }
+
+  // 🧠 Load user preference profile and build a system prefix
+  let systemPrefix = "";
+  if (userId) {
+    try {
+      const prefs = await UserPreference.findOne({ userId });
+      if (prefs) {
+        const hints = [];
+        if (prefs.style === "concise") hints.push("Keep answers concise and to the point.");
+        if (prefs.style === "detailed") hints.push("Provide thorough, detailed answers.");
+        if (prefs.format === "structured") hints.push("Always use structured formatting with headers and bullet points.");
+        if (prefs.format === "prose") hints.push("Write in flowing prose rather than bullet points.");
+        if (prefs.likesExamples === true) hints.push("Include practical examples whenever helpful.");
+        if (prefs.detailTolerance === "low") hints.push("Be brief — avoid long explanations.");
+        if (prefs.detailTolerance === "high") hints.push("Go deep — the user appreciates thorough explanations.");
+        if (prefs.rules?.length > 0) hints.push(...prefs.rules);
+        if (hints.length > 0) {
+          systemPrefix = `[User preferences — follow these strictly]\n${hints.map(h => `- ${h}`).join("\n")}\n\n`;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load user preferences:", e);
+    }
   }
 
   try {
@@ -154,7 +179,7 @@ router.post("/ask", async (req, res) => {
       historyContext = `This is an ongoing chat. Previous messages:\n${history}\nNow, continue the conversation below:\n`;
     }
 
-    const combinedPrompt = historyContext + finalPrompt;
+    const combinedPrompt = systemPrefix + historyContext + finalPrompt;
 
     // 💬 Ask AI
     const answer = await askGemini(combinedPrompt);
@@ -165,7 +190,17 @@ router.post("/ask", async (req, res) => {
       saveToChat(sessionId, "ai", answer);
     }
 
-    res.json({ answer, sessionId });
+    // 💾 Persist interaction to MongoDB
+    const messageId = randomUUID();
+    InteractionLog.create({
+      messageId,
+      userId: userId || null,
+      prompt: question || prompt || "",
+      response: answer,
+      context: { url: url || null, mode: url ? "url" : content ? "text" : null },
+    }).catch(err => console.error("Failed to save interaction log:", err));
+
+    res.json({ answer, sessionId, messageId });
   } catch (err) {
     console.error("Ask route error:", err);
     // Pass through 429 quota errors so the frontend can show the right message
@@ -178,11 +213,31 @@ router.post("/ask", async (req, res) => {
 
 // 🧠 Generate Randomized Quiz Questions
 router.post("/quiz", async (req, res) => {
-  const { url, content, numQuestions = 5 } = req.body;
+  const { url, content, numQuestions = 5, difficulty = "medium" } = req.body;
 
   if (!url && !content) {
     return res.status(400).json({ error: "Either URL or content is required to generate a quiz." });
   }
+
+  const difficultyInstructions = {
+    easy: `
+- Ask only about facts that are directly and explicitly stated in the text.
+- Use simple, clear language with no ambiguity.
+- Wrong answer options should be obviously incorrect to anyone who read the text.
+- Example question style: "According to the article, what is X?" or "Which of the following is mentioned as Y?"`,
+    medium: `
+- Mix direct recall questions with questions that require the reader to connect two ideas from the text.
+- Some wrong options should be plausible but clearly distinguishable on careful reading.
+- Example question style: "Why does the author suggest X?" or "What is the relationship between X and Y?"`,
+    hard: `
+- Focus on inference, implication, and critical analysis — NOT surface-level facts.
+- Questions should require the reader to reason about what the text implies, not just what it states.
+- All four answer options must be plausible; wrong options should be things a careless reader might believe.
+- Include questions about the author's intent, logical conclusions, comparisons, or what would happen if a detail changed.
+- Example question style: "What can be inferred from the author's claim about X?" or "Which conclusion is best supported by the evidence in the passage?"`,
+  };
+
+  const difficultyGuide = difficultyInstructions[difficulty] || difficultyInstructions.medium;
 
   try {
     // 1️⃣ Fetch or use provided content
@@ -196,27 +251,31 @@ router.post("/quiz", async (req, res) => {
       }
     }
 
-    // 2️⃣ Build AI prompt with randomness
+    // 2️⃣ Build AI prompt
     const randomSeed = Math.random().toString(36).substring(2, 8);
-    const quizPrompt = `
-You are a quiz master. Based on the following article, create ${numQuestions} multiple-choice questions.
-Each question should have exactly 4 options (A, B, C, D) and one correct answer.
-Vary the difficulty and topics randomly each time, and do not repeat identical questions between runs.
-Format the output strictly as JSON like this:
+    const quizPrompt = `You are a quiz master generating a ${difficulty.toUpperCase()} difficulty quiz.
 
+DIFFICULTY RULES FOR ${difficulty.toUpperCase()}:
+${difficultyGuide}
+
+TASK:
+Create exactly ${numQuestions} multiple-choice questions based on the article below.
+Each question must have exactly 4 answer options and one correct answer.
+Strictly follow the difficulty rules above — the questions must feel noticeably ${difficulty === "easy" ? "simple and factual" : difficulty === "medium" ? "moderately challenging" : "difficult and analytical"}.
+Do not mix difficulty levels. Every question must match the ${difficulty.toUpperCase()} standard.
+Random seed (for variety): ${randomSeed}
+
+OUTPUT FORMAT — respond with ONLY a valid JSON array, no extra text:
 [
   {
-    "question": "What is ...?",
+    "question": "...",
     "options": ["Option A", "Option B", "Option C", "Option D"],
-    "answer": "Option B"
-  },
-  ...
+    "answer": "Option A"
+  }
 ]
 
-Random seed: ${randomSeed}
-Article Content:
-${webContent.substring(0, 8000)}  // keep token limit safe
-`;
+ARTICLE:
+${webContent.substring(0, 8000)}`;
 
     // 3️⃣ Ask the AI
     const aiResponse = await askGemini(quizPrompt);
@@ -242,6 +301,7 @@ ${webContent.substring(0, 8000)}  // keep token limit safe
     res.json({
       quiz: quizData,
       totalQuestions: quizData.length,
+      difficulty,
       note: "Questions are randomized each time."
     });
 
